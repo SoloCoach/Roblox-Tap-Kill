@@ -1,13 +1,11 @@
 -- ═══════════════════════════════════════════════════════════
---  Brookhaven Kill Tool — acilan_kod.lua "açıq" patterni ilə
---  clonefunction FireServer bypass + tool + UI
+--  Brookhaven Kill Tool v2 — Anti-kick
 -- ═══════════════════════════════════════════════════════════
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
 local lp = Players.LocalPlayer
 
--- ═══ 1. AÇIQ: Təmiz FireServer (acilan_kod.lua-dan) ═══
+-- ═══ 1. Təmiz FireServer (yenə lazımdır) ═══
 local _cleanFireServer
 pcall(function()
     local dummy = Instance.new("RemoteEvent")
@@ -20,68 +18,59 @@ if not _cleanFireServer then
     end
 end
 
--- ═══ 2. Brookhaven kill remote-larını tap ═══
--- Brookhaven-in zərər remote-ları (oyun versiyasına görə dəyişə bilər)
-local KILL_REMOTES = {
-    "KillPlayer", "Damage", "TakeDamage", "Hit", "Attack",
-    "PlayerDamage", "HealthDamage", "Hurt", "Death", "Die",
-    "Kill", "Murder", "KillEvent", "DamageEvent"
-}
+-- ═══ 2. Yalnız BİR dəfə remote göndər, spam etmə ═══
+local _lastKillTime = 0
+local _killCooldown = 1.0  -- 1 saniyə cooldown (anti-cheat üçün)
 
-local function findKillRemotes()
-    local found = {}
-    local function scan(container)
-        for _, obj in ipairs(container:GetDescendants()) do
-            if obj:IsA("RemoteEvent") then
-                local n = obj.Name
-                for _, pattern in ipairs(KILL_REMOTES) do
-                    if n:lower():find(pattern:lower(), 1, true) then
-                        table.insert(found, obj)
-                        break
-                    end
-                end
-            end
-        end
-    end
-    pcall(scan, ReplicatedStorage)
-    -- Brookhaven xüsusi yerlər
-    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-    if remotes then pcall(scan, remotes) end
-    local comms = ReplicatedStorage:FindFirstChild("Comm")
-    if comms then pcall(scan, comms) end
-    return found
-end
-
--- ═══ 3. Kill funksiyası ═══
 local function killPlayer(target)
     if not target or target == lp then return false end
+    if tick() - _lastKillTime < _killCooldown then
+        return false  -- cooldown aktivdir, spam yoxdur
+    end
+
     local char = target.Character
     if not char then return false end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return false end
 
-    -- Üsul A: Təmiz FireServer ilə remote çağırışı (əsl kill)
-    local remotes = findKillRemotes()
-    for _, remote in ipairs(remotes) do
-        _cleanFireServer(remote, char, math.huge)
-        _cleanFireServer(remote, target, math.huge)
-        _cleanFireServer(remote, hum, math.huge)
-        _cleanFireServer(remote, char, hum, math.huge)
-        _cleanFireServer(remote, target.Name, math.huge)
+    _lastKillTime = tick()
+
+    -- ═══ YALNIZ 1 remote çağırışı — spam yoxdur ═══
+    -- Əvvəlcə ən çox ehtimal olunan remote-u tap
+    local remote = nil
+    local function findOne()
+        for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
+            if obj:IsA("RemoteEvent") then
+                local n = obj.Name:lower()
+                if n:find("kill", 1, true)
+                    or n:find("damage", 1, true)
+                    or n:find("hurt", 1, true) then
+                    remote = obj
+                    return
+                end
+            end
+        end
+    end
+    pcall(findOne)
+
+    if remote then
+        -- YALNIZ BİR parametr formatı cəhd et
+        pcall(function()
+            _cleanFireServer(remote, char)
+        end)
     end
 
-    -- Üsul B: Lokal (yalnız sizin ekranınızda — fallback)
+    -- Fallback: lokal kill (remote tapılmasa)
     pcall(function() hum.Health = 0 end)
-
     return true
 end
 
--- ═══ 4. Envanterə öldürmə aləti ═══
+-- ═══ 3. Tool — DÜZGÜN struktur ═══
 local tool = Instance.new("Tool")
 tool.Name = "Kill Tool"
 tool.RequiresHandle = true
 tool.CanBeDropped = false
-tool.ToolTip = "Oyunçunun üstünə bas → öldür"
+tool.ToolTip = "Oyunçunun üstünə bas"
 
 local handle = Instance.new("Part")
 handle.Name = "Handle"
@@ -89,38 +78,26 @@ handle.Size = Vector3.new(1, 1, 1)
 handle.Transparency = 0.3
 handle.Material = Enum.Material.Neon
 handle.Color = Color3.fromRGB(255, 0, 0)
-handle.Parent = tool
+handle.CanCollide = false  -- ← BU VACİB: toqquşma problemlərini önləyir
+handle.Parent = tool  -- ← Handle tool-un içindədir, düzgündür
 
--- Toxunaraq öldürmə
+-- Touched ilə kill (yalnız bir dəfə)
+local _touchedPlayers = {}
 handle.Touched:Connect(function(hit)
     local char = hit.Parent
     if not char then return end
     local player = Players:GetPlayerFromCharacter(char)
-    if player and player ~= lp then
+    if player and player ~= lp and not _touchedPlayers[player] then
+        _touchedPlayers[player] = true
         killPlayer(player)
-    end
-end)
-
--- Aktivasiya (kliklə) — mouse altındaki oyunçunu öldür
-tool.Activated:Connect(function()
-    local mouse = lp:GetMouse()
-    local target = mouse.Target
-    if not target then return end
-    local char = target.Parent
-    while char and not char:FindFirstChildOfClass("Humanoid") do
-        char = char.Parent
-    end
-    if char then
-        local player = Players:GetPlayerFromCharacter(char)
-        if player and player ~= lp then
-            killPlayer(player)
-        end
+        task.wait(1)
+        _touchedPlayers[player] = nil
     end
 end)
 
 tool.Parent = lp:WaitForChild("Backpack")
 
--- ═══ 5. Sol üstdə ad daxil etmə menyusu ═══
+-- ═══ 4. Sol üstdə ad qutusu ═══
 local gui = Instance.new("ScreenGui")
 gui.Name = "KillMenu"
 gui.ResetOnSpawn = false
@@ -140,7 +117,6 @@ corner.CornerRadius = UDim.new(0, 10)
 local stroke = Instance.new("UIStroke", frame)
 stroke.Color = Color3.fromRGB(255, 50, 50)
 stroke.Thickness = 1.5
-stroke.Transparency = 0.2
 
 local box = Instance.new("TextBox", frame)
 box.Size = UDim2.new(1, -20, 1, -12)
@@ -160,9 +136,7 @@ box.FocusLost:Connect(function(enter)
     local name = box.Text
     if name == "" then return end
 
-    -- Dəqiq uyğunluq
     local target = Players:FindFirstChild(name)
-    -- Qismən uyğunluq
     if not target then
         for _, p in ipairs(Players:GetPlayers()) do
             if p ~= lp and p.Name:lower():find(name:lower(), 1, true) then
