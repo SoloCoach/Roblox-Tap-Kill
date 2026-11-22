@@ -1,0 +1,189 @@
+-- ═══════════════════════════════════════════════════════════
+--  Brookhaven Kill Tool — acilan_kod.lua "açıq" patterni ilə
+--  clonefunction FireServer bypass + tool + UI
+-- ═══════════════════════════════════════════════════════════
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local lp = Players.LocalPlayer
+
+-- ═══ 1. AÇIQ: Təmiz FireServer (acilan_kod.lua-dan) ═══
+local _cleanFireServer
+pcall(function()
+    local dummy = Instance.new("RemoteEvent")
+    _cleanFireServer = clonefunction(dummy.FireServer)
+    dummy:Destroy()
+end)
+if not _cleanFireServer then
+    _cleanFireServer = function(remote, ...)
+        pcall(function() remote:FireServer(...) end)
+    end
+end
+
+-- ═══ 2. Brookhaven kill remote-larını tap ═══
+-- Brookhaven-in zərər remote-ları (oyun versiyasına görə dəyişə bilər)
+local KILL_REMOTES = {
+    "KillPlayer", "Damage", "TakeDamage", "Hit", "Attack",
+    "PlayerDamage", "HealthDamage", "Hurt", "Death", "Die",
+    "Kill", "Murder", "KillEvent", "DamageEvent"
+}
+
+local function findKillRemotes()
+    local found = {}
+    local function scan(container)
+        for _, obj in ipairs(container:GetDescendants()) do
+            if obj:IsA("RemoteEvent") then
+                local n = obj.Name
+                for _, pattern in ipairs(KILL_REMOTES) do
+                    if n:lower():find(pattern:lower(), 1, true) then
+                        table.insert(found, obj)
+                        break
+                    end
+                end
+            end
+        end
+    end
+    pcall(scan, ReplicatedStorage)
+    -- Brookhaven xüsusi yerlər
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    if remotes then pcall(scan, remotes) end
+    local comms = ReplicatedStorage:FindFirstChild("Comm")
+    if comms then pcall(scan, comms) end
+    return found
+end
+
+-- ═══ 3. Kill funksiyası ═══
+local function killPlayer(target)
+    if not target or target == lp then return false end
+    local char = target.Character
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+
+    -- Üsul A: Təmiz FireServer ilə remote çağırışı (əsl kill)
+    local remotes = findKillRemotes()
+    for _, remote in ipairs(remotes) do
+        _cleanFireServer(remote, char, math.huge)
+        _cleanFireServer(remote, target, math.huge)
+        _cleanFireServer(remote, hum, math.huge)
+        _cleanFireServer(remote, char, hum, math.huge)
+        _cleanFireServer(remote, target.Name, math.huge)
+    end
+
+    -- Üsul B: Lokal (yalnız sizin ekranınızda — fallback)
+    pcall(function() hum.Health = 0 end)
+
+    return true
+end
+
+-- ═══ 4. Envanterə öldürmə aləti ═══
+local tool = Instance.new("Tool")
+tool.Name = "Kill Tool"
+tool.RequiresHandle = true
+tool.CanBeDropped = false
+tool.ToolTip = "Oyunçunun üstünə bas → öldür"
+
+local handle = Instance.new("Part")
+handle.Name = "Handle"
+handle.Size = Vector3.new(1, 1, 1)
+handle.Transparency = 0.3
+handle.Material = Enum.Material.Neon
+handle.Color = Color3.fromRGB(255, 0, 0)
+handle.Parent = tool
+
+-- Toxunaraq öldürmə
+handle.Touched:Connect(function(hit)
+    local char = hit.Parent
+    if not char then return end
+    local player = Players:GetPlayerFromCharacter(char)
+    if player and player ~= lp then
+        killPlayer(player)
+    end
+end)
+
+-- Aktivasiya (kliklə) — mouse altındaki oyunçunu öldür
+tool.Activated:Connect(function()
+    local mouse = lp:GetMouse()
+    local target = mouse.Target
+    if not target then return end
+    local char = target.Parent
+    while char and not char:FindFirstChildOfClass("Humanoid") do
+        char = char.Parent
+    end
+    if char then
+        local player = Players:GetPlayerFromCharacter(char)
+        if player and player ~= lp then
+            killPlayer(player)
+        end
+    end
+end)
+
+tool.Parent = lp:WaitForChild("Backpack")
+
+-- ═══ 5. Sol üstdə ad daxil etmə menyusu ═══
+local gui = Instance.new("ScreenGui")
+gui.Name = "KillMenu"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+local ok = pcall(function() gui.Parent = game:GetService("CoreGui") end)
+if not ok then gui.Parent = lp:WaitForChild("PlayerGui") end
+
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.new(0, 240, 0, 42)
+frame.Position = UDim2.new(0, 12, 0, 12)
+frame.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+frame.BorderSizePixel = 0
+
+local corner = Instance.new("UICorner", frame)
+corner.CornerRadius = UDim.new(0, 10)
+
+local stroke = Instance.new("UIStroke", frame)
+stroke.Color = Color3.fromRGB(255, 50, 50)
+stroke.Thickness = 1.5
+stroke.Transparency = 0.2
+
+local box = Instance.new("TextBox", frame)
+box.Size = UDim2.new(1, -20, 1, -12)
+box.Position = UDim2.new(0, 10, 0, 6)
+box.BackgroundTransparency = 1
+box.Text = ""
+box.PlaceholderText = "Oyunçu adı daxil et..."
+box.TextColor3 = Color3.fromRGB(255, 255, 255)
+box.PlaceholderColor3 = Color3.fromRGB(150, 150, 160)
+box.Font = Enum.Font.GothamBold
+box.TextSize = 13
+box.ClearTextOnFocus = false
+box.TextXAlignment = Enum.TextXAlignment.Left
+
+box.FocusLost:Connect(function(enter)
+    if not enter then return end
+    local name = box.Text
+    if name == "" then return end
+
+    -- Dəqiq uyğunluq
+    local target = Players:FindFirstChild(name)
+    -- Qismən uyğunluq
+    if not target then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= lp and p.Name:lower():find(name:lower(), 1, true) then
+                target = p
+                break
+            end
+        end
+    end
+
+    if target and target ~= lp then
+        killPlayer(target)
+        box.Text = "✓ " .. target.Name
+        box.TextColor3 = Color3.fromRGB(100, 255, 100)
+        task.wait(1.5)
+        box.Text = ""
+        box.TextColor3 = Color3.fromRGB(255, 255, 255)
+    else
+        box.Text = "✗ Tapılmadı"
+        box.TextColor3 = Color3.fromRGB(255, 100, 100)
+        task.wait(1.5)
+        box.Text = ""
+        box.TextColor3 = Color3.fromRGB(255, 255, 255)
+    end
+end)
